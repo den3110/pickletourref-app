@@ -460,12 +460,18 @@ export default function AdminRefereeConsole() {
     try {
       await setStatus({ matchId: match._id, status: "live" }).unwrap();
       socket?.emit("status:update", { matchId: match._id, status: "live" });
+      socket?.emit("match:started", {
+        matchId: match._id,
+        autoNext: autoNextGame,
+      });
+
       if (gs.length === 0)
         await setGame({
           matchId: match._id,
           gameIndex: 0,
           a: 0,
           b: 0,
+          autoNext: autoNextGame,
         }).unwrap();
     } catch (e) {
       showSnack("error", e?.data?.message || e?.error || "Không thể start");
@@ -514,7 +520,13 @@ export default function AdminRefereeConsole() {
         delta: +1,
         autoNext: autoNextGame,
       }).unwrap();
-      socket?.emit("score:inc", { matchId: match._id, side, delta: +1 });
+      socket?.emit("score:inc", {
+        matchId: match._id,
+        side,
+        delta: +1,
+        autoNext: autoNextGame, // NEW
+      });
+
       (side === "A" ? setFlashA : setFlashB)(true);
       setTimeout(() => (side === "A" ? setFlashA : setFlashB)(false), 700);
     } catch (e) {
@@ -531,7 +543,12 @@ export default function AdminRefereeConsole() {
         delta: -1,
         autoNext: autoNextGame,
       }).unwrap();
-      socket?.emit("score:inc", { matchId: match._id, side, delta: -1 });
+      socket?.emit("score:inc", {
+        matchId: match._id,
+        side,
+        delta: -1,
+        autoNext: autoNextGame, // NEW
+      });
     } catch (e) {
       showSnack("error", e?.data?.message || e?.error || "Không thể trừ điểm");
     }
@@ -543,7 +560,10 @@ export default function AdminRefereeConsole() {
     try {
       await nextGame({ matchId: match._id, autoNext: autoNextGame }).unwrap();
       await refetchDetail();
-      socket?.emit("match:patched", { matchId: match._id });
+      socket?.emit("match:patched", {
+        matchId: match._id,
+        autoNext: autoNextGame, // NEW
+      });
     } catch (e) {
       // BE có thể trả 409 khi đã đủ set — coi như OK
       showSnack(
@@ -608,7 +628,11 @@ export default function AdminRefereeConsole() {
         /* 409 khi đủ set → OK, không cần báo lỗi */
       }
 
-      socket?.emit("match:patched", { matchId: match._id });
+      socket?.emit("match:patched", {
+        matchId: match._id,
+        autoNext: autoNextGame, // NEW
+      });
+
       setEarlyOpen(false);
       showSnack("success", `Đã chốt ván #${currentIndex + 1}`);
     } catch (e) {
