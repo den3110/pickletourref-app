@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Pickletour.vn Trọng tài",
+    "slug": "pickletour-app-ref",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/images/icon.png",
+    "scheme": "pickletourapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pkt.ref",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "App dùng camera để quét mã, chụp ảnh hồ sơ.",
+        "NSPhotoLibraryUsageDescription": "App cần truy cập ảnh để bạn chọn avatar.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.pkt.ref",
+      "versionCode": 12
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f41590b7-60d9-46de-9620-3655b97abe6c"
+      }
+    }
+  }
+}
