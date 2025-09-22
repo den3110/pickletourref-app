@@ -1,11 +1,13 @@
 // app/_layout.tsx (RootLayout)
+import "react-native-gesture-handler";
+import "react-native-reanimated";
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
-import { Stack, useRouter } from "expo-router";
+import { Link, Stack, usePathname, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
 import {
@@ -32,8 +34,8 @@ import { MaterialIcons } from "@expo/vector-icons";
 (global as any).Buffer = (global as any).Buffer || Buffer;
 
 if (__DEV__) {
-  require("./dev/reactotron");
-  require("./dev/ws-logger");
+  require("../dev/reactotron");
+  require("../dev/ws-logger");
 }
 
 /** Kiểm tra JWT còn hạn không (có leeway 5s) */
@@ -90,6 +92,7 @@ export default function RootLayout() {
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
+  const pathname = usePathname();
 
   if (!loaded)
     return (
@@ -117,6 +120,13 @@ export default function RootLayout() {
                         name="login"
                         options={{ headerShown: false }}
                       />
+                      <Stack.Screen
+                        name="preview-image"
+                        options={{
+                          headerShown: false,
+                          presentation: "fullScreenModal",
+                        }}
+                      />
 
                       {/* HOME: ẩn header khi landscape, hiện khi portrait */}
                       <Stack.Screen
@@ -129,29 +139,40 @@ export default function RootLayout() {
                           headerTitleAlign: "center",
                           headerRight: ({ tintColor }) =>
                             !isLandscape ? (
-                              <Pressable
-                                onPress={() => router.push("/(tabs)/schedule")}
-                                style={{
-                                  paddingHorizontal: 12,
-                                  paddingVertical: 6,
-                                  borderRadius: 999,
-                                  borderWidth: 1,
-                                  borderColor: "#ccc",
-                                }}
-                                android_ripple={{
-                                  color: "#ddd",
-                                  borderless: true,
+                              <Link
+                                href="/(tabs)/schedule"
+                                replace
+                                asChild
+                                onPress={(e) => {
+                                  // Nếu đã ở trong tabs thì không điều hướng nữa
+                                  if (pathname?.startsWith("/(tabs)")) {
+                                    e.preventDefault();
+                                  }
                                 }}
                               >
-                                <Text
+                                <Pressable
                                   style={{
-                                    fontWeight: "600",
-                                    color: tintColor || "#0f172a",
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderColor: "#ccc",
+                                  }}
+                                  android_ripple={{
+                                    color: "#ddd",
+                                    borderless: true,
                                   }}
                                 >
-                                  Khám phá
-                                </Text>
-                              </Pressable>
+                                  <Text
+                                    style={{
+                                      fontWeight: "600",
+                                      color: tintColor || "#0f172a",
+                                    }}
+                                  >
+                                    Khám phá
+                                  </Text>
+                                </Pressable>
+                              </Link>
                             ) : null,
                         }}
                       />

@@ -2,16 +2,16 @@
   "expo": {
     "name": "Pickletour.vn Trọng tài",
     "slug": "pickletour-app-ref",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "pickletourapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
+      "requireFullScreen": true,
       "supportsTablet": true,
       "bundleIdentifier": "com.pkt.ref",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "infoPlist": {
         "NSCameraUsageDescription": "App dùng camera để quét mã, chụp ảnh hồ sơ.",
         "NSPhotoLibraryUsageDescription": "App cần truy cập ảnh để bạn chọn avatar.",
@@ -50,7 +50,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "f41590b7-60d9-46de-9620-3655b97abe6c"
+        "projectId": "6e3ab74d-e148-4b97-9b08-4e44cb585894"
       }
     }
   }

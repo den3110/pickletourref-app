@@ -68,6 +68,7 @@ export const apiSlice = createApi({
     "ADMIN_MATCHES",
     "TournamentMatches",
     "Bracket",
+    "Court"
   ],
   endpoints: () => ({}),
 });

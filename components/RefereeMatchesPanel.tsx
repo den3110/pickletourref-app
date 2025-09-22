@@ -12,6 +12,7 @@ import {
   Platform,
   ActionSheetIOS,
   Alert,
+  useWindowDimensions,
 } from "react-native";
 import { useDispatch } from "react-redux";
 import { router } from "expo-router";
@@ -29,13 +30,11 @@ import {
   matchCode,
   pairLabel,
   poolNote,
-  VI_MATCH_STATUS,
 } from "./AdminRefereeConsole";
-import BottomSheet, {
-  BottomSheetBackdrop,
-  BottomSheetScrollView,
-} from "@gorhom/bottom-sheet";
 import { useExpoOrientation } from "@/hooks/useOrientationState";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { usePlatform } from "@/hooks/usePlatform";
 
 /* ============ debounce nhỏ cho ô tìm kiếm ============ */
 function useDebounced(value, delay = 400) {
@@ -78,9 +77,9 @@ function Chip({
   );
 }
 
-function SectionHeader({ title, right }) {
+function SectionHeader({ title, right, onLayout }) {
   return (
-    <View style={styles.sectionHeader}>
+    <View style={styles.sectionHeader} onLayout={onLayout}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <View style={{ flexDirection: "row", alignItems: "center" }}>
         {right}
@@ -112,7 +111,6 @@ function Accordion({ title, subtitle, right, expanded, onToggle, children }) {
 }
 
 /* ================== Modal chọn nhiều giải ================== */
-/* ================== Modal chọn nhiều giải ================== */
 function MultiTournamentPicker({
   visible,
   options,
@@ -120,7 +118,7 @@ function MultiTournamentPicker({
   onChange,
   onClose,
 }) {
-  const origRef = React.useRef(selected); // lưu lại lúc mở modal
+  const origRef = React.useRef(selected);
 
   useEffect(() => {
     if (visible) origRef.current = selected;
@@ -135,17 +133,12 @@ function MultiTournamentPicker({
     [selected, options, onChange]
   );
 
-  const selectAll = useCallback(() => {
-    onChange(options);
-  }, [options, onChange]);
-
-  const deselectAll = useCallback(() => {
-    onChange([]);
-  }, [onChange]);
-
-  const resetToOrig = useCallback(() => {
-    onChange([]);
-  }, [onChange]);
+  const selectAll = useCallback(() => onChange(options), [options, onChange]);
+  const deselectAll = useCallback(() => onChange([]), [onChange]);
+  const resetToOrig = useCallback(
+    () => onChange(origRef.current || []),
+    [onChange]
+  );
 
   const renderItem = ({ item: t }) => {
     const isSel = !!selected.find((x) => x._id === t._id);
@@ -170,7 +163,6 @@ function MultiTournamentPicker({
     >
       <View style={styles.modalBackdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-
         <View style={styles.modalCard}>
           <SectionHeader
             title="Chọn giải để hiển thị"
@@ -181,7 +173,6 @@ function MultiTournamentPicker({
             }
           />
 
-          {/* Thanh hành động nhanh */}
           <View
             style={{
               flexDirection: "row",
@@ -195,12 +186,10 @@ function MultiTournamentPicker({
               <MaterialIcons name="select-all" size={16} color="#0a84ff" />
               <Text style={styles.btnSoftText}>Chọn tất cả</Text>
             </Pressable>
-
             <Pressable onPress={deselectAll} style={styles.btnSoft}>
               <MaterialIcons name="block" size={16} color="#0a84ff" />
               <Text style={styles.btnSoftText}>Bỏ chọn tất cả</Text>
             </Pressable>
-
             <Pressable
               onPress={resetToOrig}
               style={[
@@ -266,8 +255,6 @@ function TournamentAccordion({
   tournament,
   open,
   onToggle,
-  status,
-  q,
   page,
   onPageChange,
   bracketId,
@@ -276,19 +263,115 @@ function TournamentAccordion({
   onPickMatch,
   selectedId,
 }) {
+  const [query, setQuery] = useState("");
+  const q = useDebounced(query, 400);
+  const [statusLocal, setStatusLocal] = useState("all");
+
+  useEffect(() => {
+    if (open) onPageChange(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, bracketId, statusLocal, open]);
+
+  const dashAll = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212_-]/g;
+  const canon = (s) =>
+    String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(dashAll, "-")
+      .replace(/\s+/g, "")
+      .replace(/[^a-z0-9#-]/g, "");
+
+  const addComboVariants = (str) => {
+    const withHashDash = str;
+    const noHash = str.replace(/#/g, "");
+    const noDash = str.replace(/-/g, "");
+    const noHashNoDash = noHash.replace(/-/g, "");
+    return [withHashDash, noHash, noDash, noHashNoDash];
+  };
+
+  const codeVariantsOf = (m) => {
+    const codeFromFn = matchCode?.(m) || "";
+    const rawCode = m?.codeResolved || m?.code || "";
+    const disp = displayOrder?.(m);
+
+    const bases = [];
+    if (codeFromFn) bases.push(codeFromFn);
+    if (rawCode && rawCode !== codeFromFn) bases.push(rawCode);
+
+    const vars = new Set();
+    for (const base of bases) {
+      const b = String(base);
+      addComboVariants(b).forEach((v) => vars.add(v));
+      if (!b.includes("#") && Number.isFinite(disp)) {
+        addComboVariants(`${b}#${disp}`).forEach((v) => vars.add(v));
+      }
+    }
+    return Array.from(vars)
+      .filter(Boolean)
+      .map((v) => canon(v));
+  };
+
+  const pairNickJoined = (m, evt) => {
+    const a = pairLabel?.(m?.pairA, evt) || "";
+    const b = pairLabel?.(m?.pairB, evt) || "";
+    const s1 = canon(`${a}|${b}`);
+    const s2 = s1.replace(/-/g, "");
+    return [s1, s2];
+  };
+
+  const extraFieldsJoined = (m) => {
+    const court = m?.court?.name || m?.courtName || "";
+    const brName = m?.bracket?.name || "";
+    const brType = m?.bracket?.type || "";
+    const gnote = poolNote?.(m) || "";
+    const roundStr = Number.isFinite(m?.round) ? `r${m.round}` : "";
+    const s1 = canon(`${court}|${brName}|${brType}|${gnote}|${roundStr}`);
+    const s2 = s1.replace(/-/g, "");
+    return [s1, s2];
+  };
+
+  const normalizedQ = useMemo(() => canon(q), [q]);
+  const qNoHash = useMemo(() => normalizedQ.replace(/#/g, ""), [normalizedQ]);
+  const qNoDash = useMemo(() => normalizedQ.replace(/-/g, ""), [normalizedQ]);
+  const qNoHashNoDash = useMemo(() => qNoHash.replace(/-/g, ""), [qNoHash]);
+
+  const queryForms = useMemo(
+    () =>
+      Array.from(
+        new Set([normalizedQ, qNoHash, qNoDash, qNoHashNoDash].filter(Boolean))
+      ),
+    [normalizedQ, qNoHash, qNoDash, qNoHashNoDash]
+  );
+
   const { data: brData, isLoading: brLoading } = useGetRefereeBracketsQuery(
     { tournamentId: tournament._id },
     { skip: !open }
   );
   const brackets = brData?.items || [];
 
+  const searching = !!normalizedQ;
+  const effectivePageSize = searching
+    ? Math.max(50, Math.min(200, pageSize * 20))
+    : pageSize;
+  const effectivePage = searching ? 1 : page;
+
   const queryArgs = useMemo(() => {
-    const args = { tournamentId: tournament._id, page, pageSize };
-    if (status && status !== "all") args.status = status;
-    if (q) args.q = q;
+    const args = {
+      tournamentId: tournament._id,
+      page: effectivePage,
+      pageSize: effectivePageSize,
+    };
+    if (statusLocal && statusLocal !== "all") args.status = statusLocal;
     if (bracketId && bracketId !== "all") args.bracketId = bracketId;
     return args;
-  }, [tournament._id, status, q, page, pageSize, bracketId]);
+  }, [
+    tournament._id,
+    statusLocal,
+    bracketId,
+    effectivePage,
+    effectivePageSize,
+  ]);
 
   const {
     data: matchesResp,
@@ -300,13 +383,11 @@ function TournamentAccordion({
   } = useListRefereeMatchesByTournamentQuery(queryArgs, { skip: !open });
 
   const items = matchesResp?.items || [];
-  // NEW: loại bỏ item rỗng/placeholder để không hiện "trận" trống
-  const filteredItems = useMemo(
+
+  const baseValid = useMemo(
     () =>
       (items || []).filter((m) => {
-        if (!m || typeof m !== "object") return false;
-        if (!m._id) return false; // cần id hợp lệ
-        // có ít nhất 1 thông tin hiển thị được
+        if (!m || typeof m !== "object" || !m._id) return false;
         return (
           m.pairA ||
           m.pairB ||
@@ -319,6 +400,31 @@ function TournamentAccordion({
       }),
     [items]
   );
+
+  const filteredItems = useMemo(() => {
+    if (!searching) return baseValid;
+    return baseValid.filter((m) => {
+      const evt = (m?.tournament?.eventType || "double").toLowerCase();
+
+      const codeForms = codeVariantsOf(m);
+      const codeHit = codeForms.some((c) =>
+        queryForms.some((qf) => c.includes(qf))
+      );
+      if (codeHit) return true;
+
+      const pairForms = pairNickJoined(m, evt);
+      if (pairForms.some((pf) => queryForms.some((qf) => pf.includes(qf))))
+        return true;
+
+      const extraForms = extraFieldsJoined(m);
+      if (extraForms.some((ef) => queryForms.some((qf) => ef.includes(qf))))
+        return true;
+
+      return false;
+    });
+  }, [baseValid, searching, queryForms]);
+
+  const showPagination = !searching;
   const totalPages = matchesResp?.totalPages || 1;
 
   const subtitle = [
@@ -333,19 +439,27 @@ function TournamentAccordion({
     .filter(Boolean)
     .join(" • ");
 
-  const renderMatchCode = (m) => m?.codeResolved ?? m?.code ?? matchCode(m);
+  const renderMatchCode = (m) => matchCode(m);
 
-  // “Bảng X” khi bracket.type = "group" và có groupIndex, tránh trùng poolNote
   const groupChipFrom = (m) => {
     const isGroup = (m?.bracket?.type || "") === "group";
     const gi = m?.groupIndex;
     if (!isGroup || !Number.isFinite(gi)) return null;
     const label = `Bảng ${gi}`;
-    const pn = poolNote(m);
+    const pn = poolNote?.(m);
     if (pn && String(pn).toLowerCase() === String(label).toLowerCase())
       return null;
     return label;
   };
+
+  const statusOrder = [
+    "all",
+    "scheduled",
+    "queued",
+    "assigned",
+    "live",
+    "finished",
+  ];
 
   return (
     <Accordion
@@ -376,7 +490,53 @@ function TournamentAccordion({
         </View>
       }
     >
-      {/* Inner filters: Bracket */}
+      {/* 🔎 Search */}
+      <View style={[styles.searchBox, { marginBottom: 8 }]}>
+        <MaterialIcons name="search" size={18} color="#64748b" />
+        <TextInput
+          style={styles.textInput}
+          placeholder="Tìm: v1-b1, v1-b1#1, v1b11, biệt danh…"
+          value={query}
+          onChangeText={setQuery}
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {query ? (
+          <Pressable onPress={() => setQuery("")} style={styles.iconBtn}>
+            <MaterialIcons name="close" size={16} color="#6b7280" />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {/* 🔘 Status filter */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        nestedScrollEnabled
+        style={{ marginBottom: 8 }}
+      >
+        {statusOrder.map((s) => {
+          const { label, color } = getMatchStatusChip(s);
+          return (
+            <Chip
+              key={s}
+              label={label}
+              color={color}
+              outlined={statusLocal !== s}
+              selected={statusLocal === s}
+              onPress={() => setStatusLocal(s)}
+            />
+          );
+        })}
+        {listFetching ? (
+          <View style={[styles.rowCenter, { marginLeft: 8 }]}>
+            <ActivityIndicator size="small" />
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {/* Bracket filter */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -406,11 +566,6 @@ function TournamentAccordion({
             />
           ))
         )}
-        {listFetching ? (
-          <View style={[styles.rowCenter, { marginLeft: 8 }]}>
-            <ActivityIndicator size="small" />
-          </View>
-        ) : null}
       </ScrollView>
 
       {/* Matches */}
@@ -438,6 +593,7 @@ function TournamentAccordion({
             data={filteredItems}
             keyExtractor={(m) => String(m._id)}
             style={{ flex: 1 }}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item: m }) => {
               const { label, color } = getMatchStatusChip(m.status);
               const courtName = m.court?.name || m.courtName || "";
@@ -505,19 +661,27 @@ function TournamentAccordion({
           <View style={styles.pagination}>
             <Pressable
               onPress={() => onPageChange(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              style={[styles.pageBtn, page <= 1 && styles.disabledBtn]}
+              disabled={showPagination ? page <= 1 : true}
+              style={[
+                styles.pageBtn,
+                (showPagination ? page <= 1 : true) && styles.disabledBtn,
+              ]}
             >
               <MaterialIcons name="chevron-left" size={18} color="#111827" />
               <Text style={styles.pageBtnText}>Trước</Text>
             </Pressable>
             <Text style={styles.pageText}>
-              Trang {page}/{totalPages}
+              Trang {showPagination ? page : 1}/
+              {showPagination ? totalPages : 1}
             </Text>
             <Pressable
               onPress={() => onPageChange(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              style={[styles.pageBtn, page >= totalPages && styles.disabledBtn]}
+              disabled={showPagination ? page >= totalPages : true}
+              style={[
+                styles.pageBtn,
+                (showPagination ? page >= totalPages : true) &&
+                  styles.disabledBtn,
+              ]}
             >
               <Text style={styles.pageBtnText}>Sau</Text>
               <MaterialIcons name="chevron-right" size={18} color="#111827" />
@@ -536,18 +700,18 @@ export default function RefereeMatchesPanel({
   refreshSignal,
 }) {
   const dispatch = useDispatch();
-
   const doLogout = useCallback(() => {
     try {
       dispatch(logoutAction());
       router.replace("/login");
     } catch {
-      router.replace("/"); // fallback
+      router.replace("/");
     }
   }, [dispatch]);
 
-  const confirmLogout = useCallback(() => {
+  const confirmLogout = useCallback((e) => {
     if (Platform.OS === "ios") {
+      const maybeAnchor = e?.nativeEvent?.target;
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: "Đăng xuất",
@@ -556,6 +720,7 @@ export default function RefereeMatchesPanel({
           cancelButtonIndex: 0,
           destructiveButtonIndex: 1,
           userInterfaceStyle: "light",
+          ...(maybeAnchor ? { anchor: maybeAnchor } : {}),
         },
         (i) => i === 1 && doLogout()
       );
@@ -566,17 +731,6 @@ export default function RefereeMatchesPanel({
       ]);
     }
   }, [doLogout]);
-  const [status, setStatus] = useState("all");
-  const [query, setQuery] = useState("");
-  const q = useDebounced(query, 400);
-  const { isLandscape } = useExpoOrientation();
-  const [selectedTourneys, setSelectedTourneys] = useState([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
-
-  const [openAcc, setOpenAcc] = useState({}); // { [tid]: boolean }
-  const [pageMap, setPageMap] = useState({}); // { [tid]: number }
-  const [bracketMap, setBracketMap] = useState({}); // { [tid]: "all" | bracketId }
-  const pageSize = 10;
 
   const {
     data: tourneysData,
@@ -585,21 +739,23 @@ export default function RefereeMatchesPanel({
     refetch: refetchTours,
   } = useGetRefereeTournamentsQuery();
 
-  // 🔁 Khi trận đấu kết thúc ở nơi khác → AdminRefereeConsole tăng refreshSignal → refetch lại để cập nhật "Đang chờ"
   useEffect(() => {
-    if (typeof refreshSignal !== "undefined") {
-      refetchTours();
-    }
+    if (typeof refreshSignal !== "undefined") refetchTours();
   }, [refreshSignal, refetchTours]);
 
   const tourneys = useMemo(() => tourneysData?.items || [], [tourneysData]);
 
+  const [selectedTourneys, setSelectedTourneys] = useState([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const listToRender = useMemo(() => {
     if (!selectedTourneys.length) return tourneys;
     const set = new Set(selectedTourneys.map((t) => t._id));
     return tourneys.filter((t) => set.has(t._id));
   }, [tourneys, selectedTourneys]);
 
+  const [openAcc, setOpenAcc] = useState({});
+  const [pageMap, setPageMap] = useState({});
+  const [bracketMap, setBracketMap] = useState({});
   const toggleAccordion = (tid, next) =>
     setOpenAcc((m) => ({
       ...m,
@@ -609,170 +765,293 @@ export default function RefereeMatchesPanel({
   const setBracket = (tid, bid) =>
     setBracketMap((m) => ({ ...m, [tid]: bid || "all" }));
 
+  const { isLandscape } = useExpoOrientation();
+  const { height: winH } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const navHeaderH = useHeaderHeight();
+
+  // ---- đo topBarH (portrait) & leftBarW (landscape) ----
+  const [topBarH, setTopBarH] = useState(0);
+  const onTopBarLayout = useCallback((e) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    setTopBarH((p) => (p === h ? p : h));
+  }, []);
+
+  const [leftBarW, setLeftBarW] = useState(0);
+  const onLeftBarLayout = useCallback((e) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    setLeftBarW((p) => (p === w ? p : w)); // dùng w thực đo để “calc(100% - w)”
+  }, []);
+
+  // Chiều cao panel tổng (container)
+  const panelH = Math.max(
+    240,
+    Math.round(winH - navHeaderH - (insets?.bottom ?? 0))
+  );
+
   return (
     <>
-      <View style={styles.card}>
-        <SectionHeader
-          title="Danh sách trận (Trọng tài)"
-          right={
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-             
-              <Pressable onPress={refetchTours} style={styles.iconBtn}>
-                <MaterialIcons name="refresh" size={18} color="#111827" />
-              </Pressable>
-              <Pressable
-                onPress={confirmLogout}
-                style={[
-                  styles.btnSoft,
-                  { backgroundColor: "#ef444411", marginLeft: 6 },
-                ]}
-              >
-                <MaterialIcons name="logout" size={14} color="#ef4444" />
-                <Text style={[styles.btnSoftText, { color: "#ef4444" }]}>
-                  Đăng xuất
-                </Text>
-              </Pressable>
-            </View>
-          }
-        />
-
-        {/* Filter bar */}
-        <View style={{ padding: 12 }}>
-          {/* Giải (multi) */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginBottom: 8,
-            }}
-          >
-            <MaterialIcons name="filter-alt" size={16} color="#64748b" />
-            <Text
-              style={{ marginLeft: 6, fontWeight: "700", color: "#111827" }}
-            >
-              Bộ lọc
-            </Text>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            nestedScrollEnabled
-            style={{ marginBottom: 8 }}
-          >
-            <Pressable
-              onPress={() => setPickerOpen(true)}
-              style={styles.btnSoft}
-            >
-              <MaterialIcons name="list" size={14} color="#0a84ff" />
-              <Text style={styles.btnSoftText}>
-                {selectedTourneys.length
-                  ? `${selectedTourneys.length} giải đã chọn`
-                  : "Chọn giải"}
-              </Text>
-            </Pressable>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              nestedScrollEnabled
-            >
-              {Object.keys(VI_MATCH_STATUS).map((s) => {
-                const { label, color } = getMatchStatusChip(s);
-                return (
-                  <Chip
-                    key={s}
-                    label={label}
-                    color={color}
-                    outlined={status !== s}
-                    selected={status === s}
-                    onPress={() => setStatus(s)}
-                  />
-                );
-              })}
-            </ScrollView>
-          </ScrollView>
-
-          {/* Ô tìm kiếm */}
-          <View style={styles.searchBox}>
-            <MaterialIcons name="search" size={18} color="#64748b" />
-            <TextInput
-              style={styles.textInput}
-              placeholder="Tìm theo mã trận / tên (biệt danh)"
-              value={query}
-              onChangeText={setQuery}
-              placeholderTextColor="#9ca3af"
-            />
-            {query ? (
-              <Pressable onPress={() => setQuery("")} style={styles.iconBtn}>
-                <MaterialIcons name="close" size={16} color="#6b7280" />
-              </Pressable>
-            ) : null}
-          </View>
-
-          {/* Reset */}
-          <Pressable
-            onPress={() => {
-              setStatus("all");
-              setQuery("");
-              setSelectedTourneys([]);
-            }}
-            style={styles.resetBtn}
-          >
-            <Text style={styles.resetBtnText}>Reset</Text>
-          </Pressable>
-        </View>
-
-        {/* Accordions */}
-        {loadingTours ? (
-          <View style={styles.centerBox}>
-            <ActivityIndicator />
-          </View>
-        ) : toursErr ? (
-          <View style={styles.alertError}>
-            <Text style={styles.alertText}>
-              {toursErr?.data?.message ||
-                toursErr?.error ||
-                "Lỗi tải danh sách giải"}
-            </Text>
-          </View>
-        ) : !tourneys.length ? (
-          <View style={[styles.alertInfo, { marginHorizontal: 12 }]}>
-            <Text style={styles.alertText}>
-              Bạn chưa được phân công ở giải nào.
-            </Text>
-          </View>
-        ) : (
-          <ScrollView
-            style={{ maxHeight: isLandscape ? 180 : 580, paddingHorizontal: 6 }}
-          >
-            {listToRender.map((t) => (
-              <TournamentAccordion
-                key={t._id}
-                tournament={t}
-                open={!!openAcc[t._id]}
-                onToggle={(v) => {
-                  if (v) setPage(t._id, 1); // reset page khi mở
-                  toggleAccordion(t._id, v);
-                }}
-                status={status}
-                q={q}
-                page={pageMap[t._id] || 1}
-                onPageChange={(p) => setPage(t._id, p)}
-                bracketId={bracketMap[t._id] || "all"}
-                onBracketChange={(bid) => {
-                  setBracket(t._id, bid);
-                  setPage(t._id, 1);
-                }}
-                pageSize={pageSize}
-                onPickMatch={onPickMatch}
-                selectedId={selectedId}
+      <View style={[styles.card, { height: panelH }]}>
+        {/* --------- PORTRAIT: TOP BAR cố định --------- */}
+        {/* man doc */}
+        {!isLandscape && (
+          <>
+            <View style={styles.topBar} onLayout={onTopBarLayout}>
+              <SectionHeader
+                title="Danh sách trận (Trọng tài)"
+                right={
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <Pressable onPress={refetchTours} style={styles.iconBtn}>
+                      <MaterialIcons name="refresh" size={18} color="#111827" />
+                    </Pressable>
+                    <Pressable
+                      onPress={confirmLogout}
+                      style={[
+                        styles.btnSoft,
+                        { backgroundColor: "#ef444411", marginLeft: 6 },
+                      ]}
+                    >
+                      <MaterialIcons name="logout" size={14} color="#ef4444" />
+                      <Text style={[styles.btnSoftText, { color: "#ef4444" }]}>
+                        Đăng xuất
+                      </Text>
+                    </Pressable>
+                  </View>
+                }
               />
-            ))}
-          </ScrollView>
+
+              {/* Filter (không scroll, wrap xuống dòng) */}
+              <View style={{ padding: 12 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <MaterialIcons name="filter-alt" size={16} color="#64748b" />
+                  <Text
+                    style={{
+                      marginLeft: 6,
+                      fontWeight: "700",
+                      color: "#111827",
+                    }}
+                  >
+                    Bộ lọc
+                  </Text>
+                </View>
+
+                <View style={styles.wrapRow}>
+                  <Pressable
+                    onPress={() => setPickerOpen(true)}
+                    style={styles.btnSoft}
+                  >
+                    <MaterialIcons name="list" size={14} color="#0a84ff" />
+                    <Text style={styles.btnSoftText}>
+                      {selectedTourneys.length
+                        ? `${selectedTourneys.length} giải đã chọn`
+                        : "Chọn giải"}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPress={() => setSelectedTourneys([])}
+                  style={styles.resetBtn}
+                >
+                  <Text style={styles.resetBtnText}>Reset</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Danh sách: kê paddingTop = topBarH */}
+            {/* CONTENT tuyệt đối: khung cuộn = cardHeight - topBarH */}
+            <View style={[styles.contentPane, { top: topBarH }]}>
+              {loadingTours ? (
+                <View style={[styles.centerBox, { flex: 1 }]}>
+                  <ActivityIndicator />
+                </View>
+              ) : toursErr ? (
+                <View style={styles.alertError}>
+                  <Text style={styles.alertText}>
+                    {toursErr?.data?.message ||
+                      toursErr?.error ||
+                      "Lỗi tải danh sách giải"}
+                  </Text>
+                </View>
+              ) : !tourneys.length ? (
+                <View style={[styles.alertInfo, { marginHorizontal: 12 }]}>
+                  <Text style={styles.alertText}>
+                    Bạn chưa được phân công ở giải nào.
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={{ flex: 1, paddingHorizontal: 6, marginBottom: 20 }}
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                >
+                  {listToRender.map((t) => (
+                    <TournamentAccordion
+                      key={t._id}
+                      tournament={t}
+                      open={!!openAcc[t._id]}
+                      onToggle={(v) => {
+                        if (v) setPage(t._id, 1);
+                        toggleAccordion(t._id, v);
+                      }}
+                      page={pageMap[t._id] || 1}
+                      onPageChange={(p) => setPage(t._id, p)}
+                      bracketId={bracketMap[t._id] || "all"}
+                      onBracketChange={(bid) => {
+                        setBracket(t._id, bid);
+                        setPage(t._id, 1);
+                      }}
+                      pageSize={10}
+                      onPickMatch={onPickMatch}
+                      selectedId={selectedId}
+                    />
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </>
         )}
 
-        {/* Modal chọn giải */}
+        {/* --------- LANDSCAPE: LEFT BAR cố định + nội dung bên phải (width = 100% - leftBarW) --------- */}
+        {isLandscape && (
+          <>
+            {/* LEFT sidebar cố định, không scroll */}
+            <View style={styles.leftBar} onLayout={onLeftBarLayout}>
+              <SectionHeader
+                title="Danh sách trận (Trọng tài)"
+                right={
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <Pressable onPress={refetchTours} style={styles.iconBtn}>
+                      <MaterialIcons name="refresh" size={18} color="#111827" />
+                    </Pressable>
+                    <Pressable
+                      onPress={confirmLogout}
+                      style={[
+                        styles.btnSoft,
+                        { backgroundColor: "#ef444411", marginLeft: 6 },
+                      ]}
+                    >
+                      <MaterialIcons name="logout" size={14} color="#ef4444" />
+                      <Text style={[styles.btnSoftText, { color: "#ef4444" }]}>
+                        Đăng xuất
+                      </Text>
+                    </Pressable>
+                  </View>
+                }
+              />
+              <View style={{ padding: 12 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <MaterialIcons name="filter-alt" size={16} color="#64748b" />
+                  <Text
+                    style={{
+                      marginLeft: 6,
+                      fontWeight: "700",
+                      color: "#111827",
+                    }}
+                  >
+                    Bộ lọc
+                  </Text>
+                </View>
+
+                <View style={styles.wrapRow}>
+                  <Pressable
+                    onPress={() => setPickerOpen(true)}
+                    style={styles.btnSoft}
+                  >
+                    <MaterialIcons name="list" size={14} color="#0a84ff" />
+                    <Text style={styles.btnSoftText}>
+                      {selectedTourneys.length
+                        ? `${selectedTourneys.length} giải đã chọn`
+                        : "Chọn giải"}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPress={() => setSelectedTourneys([])}
+                  style={styles.resetBtn}
+                >
+                  <Text style={styles.resetBtnText}>Reset</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* CONTENT bên phải: width = 100% - leftBarW (thực hiện bằng marginLeft) */}
+            <View style={[styles.rightPane, { marginLeft: leftBarW }]}>
+              {loadingTours ? (
+                <View style={[styles.centerBox, { flex: 1 }]}>
+                  <ActivityIndicator />
+                </View>
+              ) : toursErr ? (
+                <View style={styles.alertError}>
+                  <Text style={styles.alertText}>
+                    {toursErr?.data?.message ||
+                      toursErr?.error ||
+                      "Lỗi tải danh sách giải"}
+                  </Text>
+                </View>
+              ) : !tourneys.length ? (
+                <View style={[styles.alertInfo, { marginHorizontal: 12 }]}>
+                  <Text style={styles.alertText}>
+                    Bạn chưa được phân công ở giải nào.
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={{ flex: 1, paddingHorizontal: 6 }}
+                  contentContainerStyle={{
+                    paddingBottom:
+                      Platform.OS === "android"
+                        ? (insets?.bottom ?? 24) + 24 // safe-area (nếu có, else 24) + gutter 24
+                        : 0,
+                  }}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                  overScrollMode="never"
+                >
+                  {listToRender.map((t) => (
+                    <TournamentAccordion
+                      key={t._id}
+                      tournament={t}
+                      open={!!openAcc[t._id]}
+                      onToggle={(v) => {
+                        if (v) setPage(t._id, 1);
+                        toggleAccordion(t._id, v);
+                      }}
+                      page={pageMap[t._id] || 1}
+                      onPageChange={(p) => setPage(t._id, p)}
+                      bracketId={bracketMap[t._id] || "all"}
+                      onBracketChange={(bid) => {
+                        setBracket(t._id, bid);
+                        setPage(t._id, 1);
+                      }}
+                      pageSize={10}
+                      onPickMatch={onPickMatch}
+                      selectedId={selectedId}
+                    />
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          </>
+        )}
       </View>
+
+      {/* Modal chọn giải */}
       <MultiTournamentPicker
         visible={pickerOpen}
         options={tourneys}
@@ -789,9 +1068,42 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderRadius: 12,
-    // overflow: "hidden",
     elevation: 1,
+    overflow: "hidden",
+    position: "relative",
   },
+
+  // --- PORTRAIT TOP BAR ---
+  topBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 10,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+
+  // --- LANDSCAPE LEFT BAR ---
+  leftBar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 10,
+    backgroundColor: "#fff",
+    borderRightWidth: 1,
+    borderColor: "#e5e7eb",
+    // KHÔNG set width cố định: để nội dung tự đo width, onLayout => leftBarW
+    // Bạn có thể thêm maxWidth nhẹ nếu muốn tránh quá rộng:
+    maxWidth: 480,
+  },
+  rightPane: {
+    flex: 1,
+    minWidth: 0, // tránh overflow khi marginLeft lớn
+  },
+
   sectionHeader: {
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -801,10 +1113,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
 
-  iconBtn: {
-    padding: 6,
-    borderRadius: 8,
-  },
+  iconBtn: { padding: 6, borderRadius: 8 },
 
   btnSoft: {
     flexDirection: "row",
@@ -820,6 +1129,14 @@ const styles = StyleSheet.create({
     color: "#0a84ff",
     fontWeight: "600",
     fontSize: 12,
+  },
+
+  wrapRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
   },
 
   chip: {
@@ -841,12 +1158,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e7eb",
   },
-  textInput: {
-    flex: 1,
-    paddingVertical: 6,
-    marginLeft: 8,
-    color: "#111827",
-  },
+  textInput: { flex: 1, paddingVertical: 6, marginLeft: 8, color: "#111827" },
+
   resetBtn: {
     marginTop: 10,
     alignSelf: "flex-start",
@@ -883,11 +1196,7 @@ const styles = StyleSheet.create({
     margin: 10,
     borderRadius: 10,
   },
-  alertInfo: {
-    backgroundColor: "#eff6ff",
-    padding: 10,
-    borderRadius: 10,
-  },
+  alertInfo: { backgroundColor: "#eff6ff", padding: 10, borderRadius: 10 },
   alertText: { color: "#111827" },
 
   centerBox: { padding: 16, alignItems: "center", justifyContent: "center" },
@@ -946,6 +1255,7 @@ const styles = StyleSheet.create({
   disabledBtn: { opacity: 0.4 },
   pageBtnText: { color: "#111827", fontWeight: "600" },
   pageText: { color: "#111827", fontWeight: "600" },
+
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,.35)",
@@ -961,5 +1271,14 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: "#e5e7eb",
+  },
+  // vùng nội dung cuộn trong portrait (chiếm phần còn lại bên dưới topBar)
+  contentPane: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    // top sẽ set động = topBarH
+    backgroundColor: "#fff",
   },
 });

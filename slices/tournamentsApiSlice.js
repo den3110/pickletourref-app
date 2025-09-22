@@ -11,6 +11,10 @@ const qp = (obj) => {
   return out;
 };
 
+const normalizeListResponse = (res) =>
+  Array.isArray(res) ? { items: res } : res || { items: [] };
+
+
 export const tournamentsApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     /* ========= DANH SÁCH GIẢI (mới) ========= */
@@ -613,6 +617,93 @@ export const tournamentsApiSlice = apiSlice.injectEndpoints({
         body: { op: "nextGame", autoNext },
       }),
     }),
+
+
+   // GET /api/referee/tournaments/:tId/brackets/:bId/courts
+    getRefereeCourtsByBracket: builder.query({
+      query: ({ tournamentId, bracketId, cluster, status, active = true } = {}) => {
+        if (!tournamentId || !bracketId)
+          throw new Error("tournamentId & bracketId are required");
+        const params = new URLSearchParams();
+        if (cluster) params.set("cluster", cluster);
+        if (status) params.set("status", status);
+        if (active !== undefined) params.set("active", active ? "1" : "0");
+        const q = params.toString() ? `?${params.toString()}` : "";
+        return `/api/referee/tournaments/${tournamentId}/brackets/${bracketId}/courts${q}`;
+      },
+      transformResponse: normalizeListResponse,
+      providesTags: (result) =>
+        result?.items
+          ? [
+              ...result.items.map((c) => ({ type: "Court", id: c._id })),
+              { type: "Court", id: "LIST" },
+            ]
+          : [{ type: "Court", id: "LIST" }],
+    }),
+
+    // GET /api/referee/matches/:matchId/courts  (cùng tournament+bracket với match)
+    getCourtsForMatch: builder.query({
+      query: ({ matchId, includeBusy = false, cluster, status } = {}) => {
+        if (!matchId) throw new Error("matchId is required");
+        const params = new URLSearchParams();
+        if (includeBusy) params.set("includeBusy", "1");
+        if (cluster) params.set("cluster", cluster);
+        if (status) params.set("status", status);
+        const q = params.toString() ? `?${params.toString()}` : "";
+        return `/api/referee/matches/${matchId}/courts${q}`;
+      },
+      transformResponse: normalizeListResponse,
+      keepUnusedDataFor: 0
+    }),
+
+    /* (tuỳ bạn có route GET by id hay không) */
+    getCourtById: builder.query({
+      query: (courtId) => `/api/referee/courts/${courtId}`,
+      providesTags: (_res, _err, id) => [{ type: "Court", id }],
+    }),
+
+    /* ================= ASSIGN / UNASSIGN ================= */
+
+    // POST /api/referee/matches/:matchId/assign-court
+    refereeAssignCourt: builder.mutation({
+      query: ({ matchId, courtId, force = false, allowReassignLive = false }) => ({
+        url: `/api/referee/matches/${matchId}/assign-court`,
+        method: "POST",
+        body: { courtId, force, allowReassignLive },
+      }),
+      invalidatesTags: (_res, _err, { matchId }) => [
+        { type: "Match", id: matchId },
+        { type: "Court", id: "LIST" },
+      ],
+    }),
+
+    // POST /api/referee/matches/:matchId/unassign-court
+    refereeUnassignCourt: builder.mutation({
+      query: ({ matchId, toStatus }) => ({
+        url: `/api/referee/matches/${matchId}/unassign-court`,
+        method: "POST",
+        body: { toStatus },
+      }),
+      invalidatesTags: (_res, _err, { matchId }) => [
+        { type: "Match", id: matchId },
+        { type: "Court", id: "LIST" },
+      ],
+    }),
+
+    /* ================= COURT STATUS ================= */
+
+    // PATCH /api/referee/courts/:courtId/status
+    patchCourtStatus: builder.mutation({
+      query: ({ courtId, status }) => ({
+        url: `/api/referee/courts/${courtId}/status`,
+        method: "PATCH",
+        body: { status }, // "idle" | "assigned" | "live" | "maintenance"
+      }),
+      invalidatesTags: (_res, _err, { courtId }) => [
+        { type: "Court", id: courtId },
+        { type: "Court", id: "LIST" },
+      ],
+    }),
   }),
 });
 
@@ -671,5 +762,12 @@ export const {
   useGetRefereeBracketsQuery,
   useListRefereeMatchesByTournamentQuery,
   useGetMatchQuery,
-  useRefereeNextGameMutation
+  useRefereeNextGameMutation,
+
+  useGetRefereeCourtsByBracketQuery,
+  useGetCourtsForMatchQuery,
+  useGetCourtByIdQuery,
+  useRefereeAssignCourtMutation,
+  useRefereeUnassignCourtMutation,
+  usePatchCourtStatusMutation,
 } = tournamentsApiSlice;
