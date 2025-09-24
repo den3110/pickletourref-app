@@ -439,7 +439,8 @@ function TournamentAccordion({
     .filter(Boolean)
     .join(" • ");
 
-  const renderMatchCode = (m) => matchCode(m);
+  const renderMatchCode = (m) =>
+    m?.codeResolved || m?.globalCode || m?.globalCodeV || m?.code || "";
 
   const groupChipFrom = (m) => {
     const isGroup = (m?.bracket?.type || "") === "group";
@@ -709,28 +710,31 @@ export default function RefereeMatchesPanel({
     }
   }, [dispatch]);
 
-  const confirmLogout = useCallback((e) => {
-    if (Platform.OS === "ios") {
-      const maybeAnchor = e?.nativeEvent?.target;
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: "Đăng xuất",
-          message: "Bạn có chắc muốn đăng xuất?",
-          options: ["Huỷ", "Đăng xuất"],
-          cancelButtonIndex: 0,
-          destructiveButtonIndex: 1,
-          userInterfaceStyle: "light",
-          ...(maybeAnchor ? { anchor: maybeAnchor } : {}),
-        },
-        (i) => i === 1 && doLogout()
-      );
-    } else {
-      Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
-        { text: "Huỷ", style: "cancel" },
-        { text: "Đăng xuất", style: "destructive", onPress: doLogout },
-      ]);
-    }
-  }, [doLogout]);
+  const confirmLogout = useCallback(
+    (e) => {
+      if (Platform.OS === "ios") {
+        const maybeAnchor = e?.nativeEvent?.target;
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            title: "Đăng xuất",
+            message: "Bạn có chắc muốn đăng xuất?",
+            options: ["Huỷ", "Đăng xuất"],
+            cancelButtonIndex: 0,
+            destructiveButtonIndex: 1,
+            userInterfaceStyle: "light",
+            ...(maybeAnchor ? { anchor: maybeAnchor } : {}),
+          },
+          (i) => i === 1 && doLogout()
+        );
+      } else {
+        Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
+          { text: "Huỷ", style: "cancel" },
+          { text: "Đăng xuất", style: "destructive", onPress: doLogout },
+        ]);
+      }
+    },
+    [doLogout]
+  );
 
   const {
     data: tourneysData,

@@ -30,6 +30,7 @@ import { Provider } from "react-redux";
 import { SocketProvider } from "../context/SocketContext";
 import { Buffer } from "buffer";
 import { MaterialIcons } from "@expo/vector-icons";
+import Toast from "react-native-toast-message";
 
 (global as any).Buffer = (global as any).Buffer || Buffer;
 
@@ -178,6 +179,12 @@ export default function RootLayout() {
                       />
 
                       <Stack.Screen name="+not-found" />
+                      <Stack.Screen
+                        name="referee-dashboard"
+                        options={{
+                          headerShown: false,
+                        }}
+                      />
 
                       {/* TABS: header "Khám phá", không có nút back, có icon bảng điều khiển bên phải */}
                       <Stack.Screen
@@ -225,6 +232,7 @@ export default function RootLayout() {
             </Boot>
           </SocketProvider>
         </BottomSheetModalProvider>
+        <Toast />
       </GestureHandlerRootView>
     </Provider>
   );
